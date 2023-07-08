@@ -15,7 +15,7 @@ my $app = sub {
     my $path = $env->{PATH_INFO};
 
     if ($path eq "/nix-cache-info") {
-        return [200, ['Content-Type' => 'text/plain'], ["StoreDir: $Nix::Config::storeDir\nWantMassQuery: 1\nPriority: 30\n"]];
+        return [200, ['Content-Type' => 'text/plain'], ["StoreDir: $Nix::Config::storeDir\nWantMassQuery: 1\nPriority: 42\n"]];
     }
 
     elsif ($path =~ /^\/([0-9a-z]+)\.narinfo$/) {
