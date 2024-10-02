@@ -10,9 +10,19 @@ sub stripPath {
     $x =~ s/.*\///; $x
 }
 
+my $secretKey;
+BEGIN {
+	my $secretKeyFile = $ENV{'NIX_SECRET_KEY_FILE'};
+	if (defined $secretKeyFile) {
+		$secretKey = readFile $secretKeyFile;
+		chomp $secretKey;
+	}
+}
+
 my $app = sub {
     my $env = shift;
     my $path = $env->{PATH_INFO};
+    my $store = Nix::Store->new();
 
     if ($path eq "/nix-cache-info") {
         return [200, ['Content-Type' => 'text/plain'], ["StoreDir: $Nix::Config::storeDir\nWantMassQuery: 1\nPriority: 30\n"]];
@@ -20,9 +30,9 @@ my $app = sub {
 
     elsif ($path =~ /^\/([0-9a-z]+)\.narinfo$/) {
         my $hashPart = $1;
-        my $storePath = queryPathFromHashPart($hashPart);
+        my $storePath = $store->queryPathFromHashPart($hashPart);
         return [404, ['Content-Type' => 'text/plain'], ["No such path.\n"]] unless $storePath;
-        my ($deriver, $narHash, $time, $narSize, $refs, $sigs) = queryPathInfo($storePath, 1) or die;
+        my ($deriver, $narHash, $time, $narSize, $refs, $sigs) = $store->queryPathInfo($storePath, 1) or die;
         $narHash =~ /^sha256:(.*)/ or die;
         my $narHash2 = $1;
         die unless length($narHash2) == 52;
@@ -35,10 +45,7 @@ my $app = sub {
         $res .= "References: " . join(" ", map { stripPath($_) } @$refs) . "\n"
             if scalar @$refs > 0;
         $res .= "Deriver: " . stripPath($deriver) . "\n" if defined $deriver;
-        my $secretKeyFile = $ENV{'NIX_SECRET_KEY_FILE'};
-        if (defined $secretKeyFile) {
-            my $secretKey = readFile $secretKeyFile;
-            chomp $secretKey;
+        if (defined $secretKey) {
             my $fingerprint = fingerprintPath($storePath, $narHash, $narSize, $refs);
             my $sig = signString($secretKey, $fingerprint);
             $res .= "Sig: $sig\n";
@@ -51,31 +58,31 @@ my $app = sub {
     elsif ($path =~ /^\/nar\/([0-9a-z]+)-([0-9a-z]+)\.nar$/) {
         my $hashPart = $1;
         my $expectedNarHash = $2;
-        my $storePath = queryPathFromHashPart($hashPart);
+        my $storePath = $store->queryPathFromHashPart($hashPart);
         return [404, ['Content-Type' => 'text/plain'], ["No such path.\n"]] unless $storePath;
-        my ($deriver, $narHash, $time, $narSize, $refs, $sigs) = queryPathInfo($storePath, 1) or die;
+        my ($deriver, $narHash, $time, $narSize, $refs, $sigs) = $store->queryPathInfo($storePath, 1) or die;
         return [404, ['Content-Type' => 'text/plain'], ["Incorrect NAR hash. Maybe the path has been recreated.\n"]]
             unless $narHash eq "sha256:$expectedNarHash";
         my $fh = new IO::Handle;
-        open $fh, "-|", "nix", "dump-path", "--", $storePath;
+        open $fh, "-|", "nix", "--extra-experimental-features", "nix-command", "dump-path", "--", $storePath;
         return [200, ['Content-Type' => 'text/plain', 'Content-Length' => $narSize], $fh];
     }
 
     # FIXME: remove soon.
     elsif ($path =~ /^\/nar\/([0-9a-z]+)\.nar$/) {
         my $hashPart = $1;
-        my $storePath = queryPathFromHashPart($hashPart);
+        my $storePath = $store->queryPathFromHashPart($hashPart);
         return [404, ['Content-Type' => 'text/plain'], ["No such path.\n"]] unless $storePath;
-        my ($deriver, $narHash, $time, $narSize, $refs) = queryPathInfo($storePath, 1) or die;
+        my ($deriver, $narHash, $time, $narSize, $refs) = $store->queryPathInfo($storePath, 1) or die;
         my $fh = new IO::Handle;
-        open $fh, "-|", "nix", "dump-path", "--", $storePath;
+        open $fh, "-|", "nix", "--extra-experimental-features", "nix-command", "dump-path", "--", $storePath;
         return [200, ['Content-Type' => 'text/plain', 'Content-Length' => $narSize], $fh];
     }
 
     elsif ($path =~ /^\/log\/([0-9a-z]+-[0-9a-zA-Z\+\-\.\_\?\=]+)/) {
         my $storePath = "$Nix::Config::storeDir/$1";
         my $fh = new IO::Handle;
-        open $fh, "-|", "nix", "log", $storePath;
+        open $fh, "-|", "nix", "--extra-experimental-features", "nix-command", "log", $storePath;
         return [200, ['Content-Type' => 'text/plain' ], $fh];
     }
 
